@@ -1,0 +1,10 @@
+__pychache__/
+*.pyc
+.sh
+code_context.txt
+Procfile
+.db
+.pytest_chache
+config.py
+instance/
+migrations/
