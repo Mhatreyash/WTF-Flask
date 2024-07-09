@@ -8,3 +8,4 @@ pytest_cache/
 config.py
 instance/
 migrations/
+.gitignore
