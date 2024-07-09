@@ -1,10 +1,10 @@
-__pychache__/
+__pycache__/
 *.pyc
-.sh
+*.sh
 code_context.txt
 Procfile
-.db
-.pytest_chache
+*.db
+pytest_cache/
 config.py
 instance/
 migrations/
