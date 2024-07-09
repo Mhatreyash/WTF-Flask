@@ -1,0 +1,344 @@
+// File: __init__.py
+from flask import Flask, render_template, request
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
+from flask_migrate import Migrate
+from flask_wtf.csrf import CSRFProtect
+
+db = SQLAlchemy()
+migrate = Migrate()
+login_manager = LoginManager()
+csrf = CSRFProtect()
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object('config.Config')
+
+    db.init_app(app)
+    migrate.init_app(app, db)
+    login_manager.init_app(app)
+    csrf.init_app(app)
+
+    from models import User
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
+    from main.routes import bp as main_bp
+    app.register_blueprint(main_bp)
+
+    from auth.routes import bp as auth_bp
+    app.register_blueprint(auth_bp, url_prefix='/auth')
+
+    print("Blueprints registered", main_bp, auth_bp)
+    print(f"App routes: {app.url_map}")
+
+    @app.errorhandler(404)
+    def page_not_found(e):
+        print(f"404 error: {request.url}")
+        print(f"Request method: {request.method}")
+        print(f"Request headers: {request.headers}")
+        return render_template('404.html'), 404
+
+    return app
+
+// File: app.py
+from __init__ import create_app
+
+app = create_app()
+print("App created successfully")
+print(f"App routes: {app.url_map}")
+
+if __name__ == '__main__':
+    app.run(debug=True)
+else:
+    print("Warning: app.py is being imported, not run directly")
+// File: auth/__init__.py
+from flask import Blueprint
+
+bp = Blueprint('auth', __name__)
+
+from . import routes
+
+// File: auth/forms.py
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, SubmitField
+from wtforms.validators import DataRequired, Email, EqualTo, Length
+
+class RegistrationForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=2, max=20)])
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
+    submit = SubmitField('Sign Up')
+
+class LoginForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    submit = SubmitField('Login')
+
+// File: auth/routes.py
+from flask import Blueprint, render_template, redirect, url_for, request, flash
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import login_user, logout_user, login_required, current_user
+from .forms import RegistrationForm, LoginForm
+from models import db, User
+
+bp = Blueprint('auth', __name__)
+
+@bp.route('/register', methods=['GET', 'POST'])
+def register():
+    print("Auth register route accessed")
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256', salt_length=16)
+        new_user = User(username=form.username.data, email=form.email.data, password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+        flash('Registration successful. You can now log in.') 
+        return redirect(url_for('auth.login'))
+    return render_template('register.html', form=form)
+
+@bp.route('/login', methods=['GET', 'POST'])
+def login():
+    print("Auth login route accessed")
+    form = LoginForm()
+    if form.validate_on_submit():
+        email = form.email.data
+        password = form.password.data
+        user = User.query.filter_by(email=email).first()
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            return redirect(url_for('auth.profile'))
+        else:
+            flash('Login failed. Check your email and password.')
+    return render_template('login.html', form=form)
+
+@bp.route('/profile')
+@login_required
+def profile():
+    return render_template('profile.html', name=current_user.username, bio=current_user.bio)
+
+@bp.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('auth.login'))
+// File: config.py
+class Config:
+    SECRET_KEY = 'your_secret_key'
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///site.db'
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SESSION_COOKIE_SECURE = True
+    REMEMBER_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_HTTPONLY = True
+    SESSION_PROTECTION = 'strong'
+
+// File: main/__init__.py
+from flask import Blueprint
+
+bp = Blueprint('main', __name__)
+
+from . import routes
+
+// File: main/routes.py
+from flask import Blueprint, render_template
+
+bp = Blueprint('main', __name__)
+
+@bp.route('/')
+def index():
+    return render_template('index.html')
+
+// File: migrations/env.py
+from __future__ import with_statement
+
+import logging
+from logging.config import fileConfig
+
+from flask import current_app
+
+from alembic import context
+
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
+config = context.config
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+fileConfig(config.config_file_name)
+logger = logging.getLogger('alembic.env')
+
+# add your model's MetaData object here
+# for 'autogenerate' support
+# from myapp import mymodel
+# target_metadata = mymodel.Base.metadata
+config.set_main_option(
+    'sqlalchemy.url',
+    str(current_app.extensions['migrate'].db.get_engine().url).replace(
+        '%', '%%'))
+target_metadata = current_app.extensions['migrate'].db.metadata
+
+# other values from the config, defined by the needs of env.py,
+# can be acquired:
+# my_important_option = config.get_main_option("my_important_option")
+# ... etc.
+
+
+def run_migrations_offline():
+    """Run migrations in 'offline' mode.
+
+    This configures the context with just a URL
+    and not an Engine, though an Engine is acceptable
+    here as well.  By skipping the Engine creation
+    we don't even need a DBAPI to be available.
+
+    Calls to context.execute() here emit the given string to the
+    script output.
+
+    """
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url, target_metadata=target_metadata, literal_binds=True
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online():
+    """Run migrations in 'online' mode.
+
+    In this scenario we need to create an Engine
+    and associate a connection with the context.
+
+    """
+
+    # this callback is used to prevent an auto-migration from being generated
+    # when there are no changes to the schema
+    # reference: http://alembic.zzzcomputing.com/en/latest/cookbook.html
+    def process_revision_directives(context, revision, directives):
+        if getattr(config.cmd_opts, 'autogenerate', False):
+            script = directives[0]
+            if script.upgrade_ops.is_empty():
+                directives[:] = []
+                logger.info('No changes in schema detected.')
+
+    connectable = current_app.extensions['migrate'].db.get_engine()
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            process_revision_directives=process_revision_directives,
+            **current_app.extensions['migrate'].configure_args
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+// File: models.py
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from wtf import db
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False, unique=True)
+    email = db.Column(db.String(150), nullable=False, unique=True)
+    password = db.Column(db.String(150), nullable=False)
+    bio = db.Column(db.String(300))
+
+// File: templates/404.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+</head>
+<body>
+    <h1>Error : 404</h1>
+    <h2>Page not found</h2>
+</body>
+</html>
+
+// File: templates/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+</head>
+<body>
+    <h1>Welcome to the Home Page</h1>
+    <p><a href="{{ url_for('auth.login') }}">Login</a> or <a href="{{ url_for('auth.register') }}">Register</a></p>
+</body>
+</html>
+
+// File: templates/login.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+</head>
+<body>
+    <h1>Login</h1>
+    <form method="POST">
+        {{ form.hidden_tag() }}
+        <p>{{ form.email.label }} {{ form.email(size=32) }}</p>
+        <p>{{ form.password.label }} {{ form.password(size=32) }}</p>
+        <p>{{ form.submit() }}</p>
+    </form>
+    <a href="{{ url_for('auth.register') }}">Register</a>
+</body>
+</html>
+
+// File: templates/profile.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile</title>
+</head>
+<body>
+    <h1>Profile Page</h1>
+    <p>Username: {{ name }}</p>
+    <p>Bio: {{ bio }}</p>
+    <a href="{{ url_for('auth.logout') }}">Logout</a>
+</body>
+</html>
+
+// File: templates/register.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register</title>
+</head>
+<body>
+    <h1>Register</h1>
+    <form method="POST">
+        {{ form.hidden_tag() }}
+        <p>{{ form.username.label }} {{ form.username(size=32) }}</p>
+        <p>{{ form.email.label }} {{ form.email(size=32) }}</p>
+        <p>{{ form.password.label }} {{ form.password(size=32) }}</p>
+        <p>{{ form.confirm_password.label }} {{ form.confirm_password(size=32) }}</p>
+        <p>{{ form.submit() }}</p>
+    </form>
+    <a href="{{ url_for('auth.login') }}">Login</a>
+</body>
+</html>
