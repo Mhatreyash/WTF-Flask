@@ -68,18 +68,3 @@ Before running this project, ensure you have the following installed:
 2. Fill out the form and submit it.
 3. The server will validate the input and return the appropriate response.
 
-## Project Structure
-
-```plaintext
-flask-wtf-demo/
-│
-├── app/
-│   ├── __init__.py
-│   ├── forms.py
-│   ├── routes.py
-│   └── templates/
-│       └── form.html
-├── venv/
-│
-├── requirements.txt
-└── run.py
